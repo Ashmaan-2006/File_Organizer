@@ -2,7 +2,8 @@ from pathlib import Path
 import re
 import shutil
 import json
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from collections import Counter
 from pypdf import PdfReader
 from docx import Document
@@ -11,9 +12,18 @@ from sklearn.cluster import AgglomerativeClustering
 
 FOLDER = Path(r"C:\Users\ashma\Downloads")
 DRY_RUN = True
+SCAN_SUBFOLDERS = True
+LOOKBACK_DAYS = 30
 LOG_FILE = FOLDER / "organizer_log.json"
 
 SUPPORTED_TEXT_TYPES = {".txt", ".md", ".csv"}
+PDF_READ_ERRORS = []
+IGNORED_SUFFIXES = {
+    ".exe", ".msi", ".zip", ".rar", ".7z",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".mp3", ".mp4", ".mov", ".avi",
+    ".iso", ".dll",
+}
 
 STOP_WORDS = {
     "the", "and", "for", "with", "from", "that", "this",
@@ -21,10 +31,18 @@ STOP_WORDS = {
     "download", "document", "pdf", "docx"
 }
 
+# keeps pypdf from filling the terminal with low-level warnings
+logging.getLogger("pypdf").setLevel(logging.ERROR)
+
 def scan_files(folder: Path):
+    iterator = folder.rglob("*") if SCAN_SUBFOLDERS else folder.iterdir()
+    cutoff_time = datetime.now() - timedelta(days=LOOKBACK_DAYS)
     return [
-        item for item in folder.iterdir()
-        if item.is_file() and item.name != LOG_FILE.name
+        item for item in iterator
+        if item.is_file()
+        and item.name != LOG_FILE.name
+        and item.suffix.lower() not in IGNORED_SUFFIXES
+        and datetime.fromtimestamp(item.stat().st_mtime) >= cutoff_time
     ]
 
 def clean_filename(path: Path):
@@ -49,7 +67,15 @@ def extract_text(path: Path):
             return path.read_text(errors="ignore")[:5000]
 
     except Exception as error:
-        print(f"Could not read {path.name}: {error}")
+        message = str(error)
+
+        # encrypted PDFs sometimes need cryptography installed
+        if "cryptography>=3.1 is required for AES algorithm" in message:
+            note = f"{path.name}: encrypted PDF needs the 'cryptography' package"
+        else:
+            note = f"{path.name}: {message}"
+
+        PDF_READ_ERRORS.append(note)
 
     return ""
 
@@ -92,6 +118,16 @@ def cluster_files(files):
         groups.setdefault(label, []).append(file)
 
     return groups
+
+
+def print_read_issues():
+    if not PDF_READ_ERRORS:
+        return
+
+    print("\nSome files could not be fully read:")
+    for issue in sorted(set(PDF_READ_ERRORS)):
+        print(f"  - {issue}")
+    print("Those files were still included, but mostly based on their filenames.")
 
 def get_safe_destination(target_folder: Path, file: Path):
     destination = target_folder / file.name
@@ -143,6 +179,7 @@ def main():
         return
 
     groups = cluster_files(files)
+    print_read_issues()
 
     print("\nOrganization plan:")
 
