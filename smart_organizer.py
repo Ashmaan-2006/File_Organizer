@@ -1,13 +1,21 @@
 from pathlib import Path
 import re
+from collections import Counter
 from pypdf import PdfReader
 from docx import Document
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 
 FOLDER = Path(r"C:\Users\ashma\Downloads")
+DRY_RUN = True
 
 SUPPORTED_TEXT_TYPES = {".txt", ".md", ".csv"}
+
+STOP_WORDS = {
+    "the", "and", "for", "with", "from", "that", "this",
+    "file", "final", "copy", "new", "old", "version",
+    "download", "document", "pdf", "docx"
+}
 
 def scan_files(folder: Path):
     return [item for item in folder.iterdir() if item.is_file()]
@@ -41,6 +49,23 @@ def extract_text(path: Path):
 def build_file_context(file: Path):
     return f"{clean_filename(file)} {extract_text(file)}"
 
+def generate_folder_name(files):
+    words = []
+
+    for file in files:
+        cleaned = clean_filename(file)
+        for word in cleaned.split():
+            if len(word) > 2 and word not in STOP_WORDS:
+                words.append(word)
+
+    common_words = [word for word, _ in Counter(words).most_common(4)]
+
+    if not common_words:
+        return "Misc"
+
+    folder_name = "_".join(common_words).title()
+    return folder_name[:50]
+
 def cluster_files(files):
     texts = [build_file_context(file) for file in files]
 
@@ -70,10 +95,16 @@ def main():
 
     groups = cluster_files(files)
 
-    for label, grouped_files in groups.items():
-        print(f"\nGroup {label}:")
+    print("\nPreview organization plan:")
+
+    for grouped_files in groups.values():
+        folder_name = generate_folder_name(grouped_files)
+
+        print(f"\nFolder: {folder_name}")
         for file in grouped_files:
-            print(f"  {file.name}")
+            print(f"  - {file.name}")
+
+    print("\nDry run complete. No files were moved.")
 
 if __name__ == "__main__":
     main()
