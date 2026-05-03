@@ -1,5 +1,8 @@
 from pathlib import Path
 import re
+import shutil
+import json
+from datetime import datetime
 from collections import Counter
 from pypdf import PdfReader
 from docx import Document
@@ -8,6 +11,7 @@ from sklearn.cluster import AgglomerativeClustering
 
 FOLDER = Path(r"C:\Users\ashma\Downloads")
 DRY_RUN = True
+LOG_FILE = FOLDER / "organizer_log.json"
 
 SUPPORTED_TEXT_TYPES = {".txt", ".md", ".csv"}
 
@@ -18,7 +22,10 @@ STOP_WORDS = {
 }
 
 def scan_files(folder: Path):
-    return [item for item in folder.iterdir() if item.is_file()]
+    return [
+        item for item in folder.iterdir()
+        if item.is_file() and item.name != LOG_FILE.name
+    ]
 
 def clean_filename(path: Path):
     name = path.stem.lower()
@@ -86,6 +93,48 @@ def cluster_files(files):
 
     return groups
 
+def get_safe_destination(target_folder: Path, file: Path):
+    destination = target_folder / file.name
+
+    if not destination.exists():
+        return destination
+
+    counter = 1
+
+    while True:
+        new_name = f"{file.stem}_{counter}{file.suffix}"
+        destination = target_folder / new_name
+
+        if not destination.exists():
+            return destination
+
+        counter += 1
+
+def move_files(groups):
+    log_entries = []
+
+    for grouped_files in groups.values():
+        folder_name = generate_folder_name(grouped_files)
+        target_folder = FOLDER / folder_name
+
+        for file in grouped_files:
+            destination = get_safe_destination(target_folder, file)
+
+            print(f"Moving: {file.name} -> {destination}")
+
+            if not DRY_RUN:
+                target_folder.mkdir(exist_ok=True)
+                shutil.move(str(file), str(destination))
+
+                log_entries.append({
+                    "original_path": str(file),
+                    "new_path": str(destination),
+                    "moved_at": datetime.now().isoformat()
+                })
+
+    if not DRY_RUN:
+        LOG_FILE.write_text(json.dumps(log_entries, indent=2))
+
 def main():
     files = scan_files(FOLDER)
 
@@ -95,7 +144,7 @@ def main():
 
     groups = cluster_files(files)
 
-    print("\nPreview organization plan:")
+    print("\nOrganization plan:")
 
     for grouped_files in groups.values():
         folder_name = generate_folder_name(grouped_files)
@@ -104,7 +153,12 @@ def main():
         for file in grouped_files:
             print(f"  - {file.name}")
 
-    print("\nDry run complete. No files were moved.")
+    if DRY_RUN:
+        print("\nDry run complete. No files were moved.")
+        print("Change DRY_RUN to False when you are ready.")
+    else:
+        move_files(groups)
+        print(f"\nFiles moved. Undo log saved to: {LOG_FILE}")
 
 if __name__ == "__main__":
     main()
