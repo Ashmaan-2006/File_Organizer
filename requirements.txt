@@ -1,2 +1,4 @@
 pypdf
 python-docx
+sentence-transformers
+scikit-learn

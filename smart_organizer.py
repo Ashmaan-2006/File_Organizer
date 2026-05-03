@@ -2,6 +2,8 @@ from pathlib import Path
 import re
 from pypdf import PdfReader
 from docx import Document
+from sentence_transformers import SentenceTransformer
+from sklearn.cluster import AgglomerativeClustering
 
 FOLDER = Path(r"C:\Users\ashma\Downloads")
 
@@ -22,12 +24,7 @@ def extract_text(path: Path):
     try:
         if suffix == ".pdf":
             reader = PdfReader(str(path))
-            text = []
-
-            for page in reader.pages[:3]:
-                text.append(page.extract_text() or "")
-
-            return " ".join(text)
+            return " ".join((page.extract_text() or "") for page in reader.pages[:3])
 
         if suffix == ".docx":
             doc = Document(str(path))
@@ -41,17 +38,42 @@ def extract_text(path: Path):
 
     return ""
 
+def build_file_context(file: Path):
+    return f"{clean_filename(file)} {extract_text(file)}"
+
+def cluster_files(files):
+    texts = [build_file_context(file) for file in files]
+
+    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    embeddings = model.encode(texts)
+
+    clusterer = AgglomerativeClustering(
+        n_clusters=None,
+        distance_threshold=1.15
+    )
+
+    labels = clusterer.fit_predict(embeddings)
+
+    groups = {}
+
+    for file, label in zip(files, labels):
+        groups.setdefault(label, []).append(file)
+
+    return groups
+
 def main():
     files = scan_files(FOLDER)
 
-    for file in files:
-        cleaned_name = clean_filename(file)
-        extracted_text = extract_text(file)
+    if len(files) < 2:
+        print("Not enough files to organize.")
+        return
 
-        print("\n--------------------")
-        print(f"File: {file.name}")
-        print(f"Clean name: {cleaned_name}")
-        print(f"Text preview: {extracted_text[:300]}")
+    groups = cluster_files(files)
+
+    for label, grouped_files in groups.items():
+        print(f"\nGroup {label}:")
+        for file in grouped_files:
+            print(f"  {file.name}")
 
 if __name__ == "__main__":
     main()
