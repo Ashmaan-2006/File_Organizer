@@ -1,4 +1,5 @@
 from pathlib import Path
+import argparse
 import re
 import shutil
 import json
@@ -10,7 +11,9 @@ from docx import Document
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 
-FOLDER = Path(r"C:\Users\ashma\Downloads")
+# default to the current user's Downloads folder so the script is portable
+DEFAULT_FOLDER = Path.home() / "Downloads"
+FOLDER = DEFAULT_FOLDER
 DRY_RUN = True
 SCAN_SUBFOLDERS = True
 LOOKBACK_DAYS = 30
@@ -146,12 +149,13 @@ def get_safe_destination(target_folder: Path, file: Path):
 
         counter += 1
 
-def move_files(groups):
+def move_files(groups, target_root: Path):
     log_entries = []
+    log_file = target_root / "organizer_log.json"
 
     for grouped_files in groups.values():
         folder_name = generate_folder_name(grouped_files)
-        target_folder = FOLDER / folder_name
+        target_folder = target_root / folder_name
 
         for file in grouped_files:
             destination = get_safe_destination(target_folder, file)
@@ -169,10 +173,19 @@ def move_files(groups):
                 })
 
     if not DRY_RUN:
-        LOG_FILE.write_text(json.dumps(log_entries, indent=2))
+        log_file.write_text(json.dumps(log_entries, indent=2))
 
 def main():
-    files = scan_files(FOLDER)
+    parser = argparse.ArgumentParser(description="Group similar files and organize them into folders.")
+    parser.add_argument(
+        "--folder",
+        default=str(FOLDER),
+        help="Folder to organize. Defaults to your Downloads folder.",
+    )
+    args = parser.parse_args()
+
+    folder = Path(args.folder).expanduser()
+    files = scan_files(folder)
 
     if len(files) < 2:
         print("Not enough files to organize.")
@@ -194,8 +207,8 @@ def main():
         print("\nDry run complete. No files were moved.")
         print("Change DRY_RUN to False when you are ready.")
     else:
-        move_files(groups)
-        print(f"\nFiles moved. Undo log saved to: {LOG_FILE}")
+        move_files(groups, folder)
+        print(f"\nFiles moved. Undo log saved to: {folder / 'organizer_log.json'}")
 
 if __name__ == "__main__":
     main()
